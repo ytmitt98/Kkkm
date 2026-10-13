@@ -1,0 +1,791 @@
+print' >> press "p" to make preset'
+wait(.25)
+
+workspace.StreamingEnabled = false
+local CoreGui = game:GetService("CoreGui")
+local RunService = game:GetService("RunService")
+local HttpService = game:GetService("HttpService")
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local MarketplaceService = game:GetService("MarketplaceService")
+local player = Players.LocalPlayer
+local character = player.Character or player.CharacterAdded:Wait()
+local PlayerGui = player:WaitForChild("PlayerGui")
+
+local function c(v)
+	local Frame = v:WaitForChild("Frame")
+	if Frame:FindFirstChild("Cloose") then return end
+	local p = Instance.new("TextButton", Frame)
+	p.Name = "Cloose"
+	p.AnchorPoint = Vector2.new(0.5, 0.5)
+	p.BackgroundColor3 = Color3.fromRGB(200, 0, 0)
+	p.BackgroundTransparency = 0.3
+	p.Position = UDim2.new(0.96, 0, 0.055, 0)
+	p.Size = UDim2.new(0.07, 0, 0.12, 0)
+	p.Text = "X"
+	p.TextColor3 = Color3.fromRGB(255, 225, 228)
+	p.TextScaled = true
+	p.Active = true
+	p.Activated:Connect(function()
+		PlayerGui:FindFirstChild("ChooseSongGui"):Destroy()
+	end)
+end
+local Existing = PlayerGui:FindFirstChild("ChooseSongGui")
+if Existing then c(Existing) end
+PlayerGui.ChildAdded:Connect(function(Child)
+	if Child.Name == "ChooseSongGui" then c(Child) end
+end)
+
+loadstring(game:HttpGet("https://raw.githubusercontent.com/3-7x/Preset-Maker/refs/heads/main/pm"))()
+
+getgenv().SecureMode = true
+getgenv().InterfaceName = "OpenViz"
+
+local orbiting = false
+local orbitStartTime = tick()
+local tracked = {}
+local idxCounter = 0
+local targetPlayer = player
+local audioVisualizerEnabled = true
+local maxRadiusBoost = 8
+local visualizerSensitivity = 1
+local smoothingFactor = 0.15
+local currentRadiusBoost = 0
+local loudnessThreshold = 50
+local currentSpeed = 2
+local currentSize = 5
+local currentHeight = 3
+local netlessEnabled = true
+local netlessVector = Vector3.new(15,15,15)
+local sessionSeed = math.random(1, 100000)
+local audioId = nil
+local dupeTargetAmount = 3
+local dupeCancelled = false
+local BOOM_LONG = 3.2
+local boomPitch = 1
+local boomDistortion = 0
+local boomTPos = 0
+local placeId = game.PlaceId
+
+local gameConfigs = {
+    [6116002492] = { fire = function(payload, raw)
+        pcall(function()
+            game:GetService("ReplicatedStorage"):WaitForChild("Events"):WaitForChild("BoomboxRemote")
+                :FireServer("PlaySong", payload, boomPitch, boomTPos, boomDistortion)
+        end)
+    end },
+    [94627146701095] = { fire = function(payload, raw)
+        pcall(function()
+            local args = {"PlaySong", "Gamepass", payload, {Pitch = boomPitch, TimePos = boomTPos, Distortion = boomDistortion}}
+            player.Character:WaitForChild("Boombox"):WaitForChild("Remote"):FireServer(unpack(args))
+        end)
+    end },
+    [16658586976] = { fire = function(payload, raw)
+        pcall(function()
+            local remotes = {}
+            for _, a in pairs(player.Character:GetDescendants()) do
+                if a:IsA("RemoteFunction") then remotes[#remotes + 1] = a end
+            end
+            local random = math.random(100,500)
+            local ant = "\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n" .. string.rep(" ",300) .. "+" .. string.rep("0",random) .. raw
+            for i = 1, #remotes do task.spawn(remotes[i].InvokeServer, remotes[i], "PlayAudio", ant, boomPitch, boomTPos, boomDistortion) end
+        end)
+    end },
+    [5484617659] = { fire = function(payload, raw)
+        pcall(function() player.Character:WaitForChild("BoomBoxnew2"):WaitForChild("Remote"):FireServer("PlaySong", tonumber(raw)) end)
+    end },
+    [71227808846786] = { fire = function(payload, raw)
+        pcall(function() player.Character:WaitForChild("BoomBox"):WaitForChild("Remote"):FireServer("PlaySong", tonumber(raw), boomPitch, boomTPos, 1) end)
+    end },
+}
+
+local function fireBoombox(payload, raw)
+    local cfg = gameConfigs[placeId]
+    if cfg then cfg.fire(payload, raw)
+    else
+        pcall(function() game.ReplicatedStorage.Events.BoomboxRemote:FireServer("PlaySong", payload) end)
+        pcall(function()
+            local args = {"PlaySong", "Gamepass", payload, {Pitch = boomPitch, TimePos = boomTPos}}
+            player.Character:FindFirstChild("Boombox").Remote:FireServer(unpack(args))
+        end)
+        local rarara = {}
+        for _, remote in pairs(player.Character:GetDescendants()) do
+            if remote:IsA("RemoteEvent") then table.insert(rarara, remote) end
+        end
+        for _, remote in pairs(rarara) do task.spawn(function() remote:FireServer("PlaySong", payload) end) end
+    end
+end
+
+local antiFlingEnabled = false
+local stealToolsEnabled = false
+local antiLogEnabled = false
+local showArt = true
+local showCredits = true
+local customMessage = ""
+local fakeID = "71195398854825"
+
+local clonePos = Vector3.new()
+local cloneVel = Vector3.new()
+local cloneLook = Vector3.new(0, 0, -1)
+local cloneOnGround = false
+local activeEmote = nil
+local emoteStartTime = 0
+local timeIdle = 0
+local wheelRollAngle = 0
+
+local camPart = Instance.new("Part")
+camPart.Name = "OpenVizCamPart"
+camPart.Transparency = 1
+camPart.CanCollide = false
+camPart.Anchored = true
+camPart.Size = Vector3.new(1, 1, 1)
+camPart.Parent = workspace
+
+local orbitPresets = {
+    ["R6 Clone"] = {r6Clone=true},
+}
+local activePresetName = "R6 Clone"
+local activePreset = orbitPresets[activePresetName]
+
+local function countTracked()
+    local n = 0
+    for _ in pairs(tracked) do n = n + 1 end
+    return n
+end
+
+local function getMaxLoudness()
+    local maxLoudness = 0
+    if targetPlayer ~= player and targetPlayer and targetPlayer.Parent and targetPlayer.Character then
+        for _, obj in ipairs(targetPlayer.Character:GetDescendants()) do
+            if obj:IsA("Sound") and obj.IsPlaying and obj.PlaybackLoudness > maxLoudness then
+                maxLoudness = obj.PlaybackLoudness
+            end
+        end
+        return maxLoudness
+    end
+    for tool, data in pairs(tracked) do
+        if not data.sound or not data.sound.Parent then
+            data.sound = tool:FindFirstChildWhichIsA("Sound", true)
+        end
+        if data.sound and data.sound.IsPlaying and data.sound.PlaybackLoudness > maxLoudness then
+            maxLoudness = data.sound.PlaybackLoudness
+        end
+    end
+    return maxLoudness
+end
+
+local function setupMovers(handle)
+    local att = Instance.new("Attachment")
+    att.Name = "OrbitAtt"
+    att.Parent = handle
+    local alignPos = Instance.new("AlignPosition")
+    alignPos.Mode = Enum.PositionAlignmentMode.OneAttachment
+    alignPos.Attachment0 = att
+    alignPos.MaxForce = math.huge
+    alignPos.Responsiveness = 200
+    alignPos.ApplyAtCenterOfMass = true
+    alignPos.Parent = handle
+    local alignRot = Instance.new("AlignOrientation")
+    alignRot.Mode = Enum.OrientationAlignmentMode.OneAttachment
+    alignRot.Attachment0 = att
+    alignRot.MaxTorque = math.huge
+    alignRot.Responsiveness = 200
+    alignRot.Parent = handle
+    return alignPos, alignRot, att
+end
+
+local function trackTool(tool)
+    if not tool or not tool:IsA("Tool") then return end
+    if tracked[tool] then return end
+    local handle = tool:FindFirstChild("Handle")
+    if not handle then return end
+    local sound = tool:FindFirstChildWhichIsA("Sound", true)
+    idxCounter = idxCounter + 1
+    pcall(function()
+        handle.Massless = true
+        handle.CanCollide = false
+        handle.AssemblyLinearVelocity = Vector3.new(0, 4, 0)
+    end)
+    local ap, ao, att = setupMovers(handle)
+    tracked[tool] = { handle=handle, sound=sound, alignPos=ap, alignRot=ao, att=att, index=idxCounter, netlessAllowed=false, startTime=tick() }
+    task.delay(0.2, function() if tracked[tool] then tracked[tool].netlessAllowed = true end end)
+end
+
+local function untrackAndDestroy(tool)
+    local data = tracked[tool]
+    if not data then return end
+    pcall(function()
+        if data.alignPos then data.alignPos:Destroy() end
+        if data.alignRot then data.alignRot:Destroy() end
+        if data.att then data.att:Destroy() end
+    end)
+    tracked[tool] = nil
+end
+
+local function setToolAnim(id)
+    if not character then return end
+    local animScript = character:FindFirstChild("Animate")
+    if animScript then
+        local toolNone = animScript:FindFirstChild("toolnone")
+        if toolNone then
+            local anim = toolNone:FindFirstChild("ToolNoneAnim")
+            if anim then anim.AnimationId = id end
+        end
+    end
+end
+
+local function stopVisualizer()
+    orbiting = false
+    idxCounter = 0
+    if player.Character and player.Character:FindFirstChild("Humanoid") then
+        player.Character.Humanoid.WalkSpeed = 16
+        player.Character.Humanoid.JumpPower = 50
+        workspace.CurrentCamera.CameraSubject = player.Character.Humanoid
+    end
+    for tool, _ in pairs(tracked) do untrackAndDestroy(tool) end
+    tracked = {}
+    for _, jjj in pairs(player.Character:GetChildren()) do
+        if jjj:IsA("Tool") then jjj.Parent = player.Backpack end
+    end
+    if player.Character and player.Character:FindFirstChild("Humanoid") then
+        if player.Character.Humanoid.RigType == Enum.HumanoidRigType.R15 then
+            setToolAnim("http://www.roblox.com/asset/?id=507768375")
+        else
+            setToolAnim("rbxassetid://182393478")
+        end
+    end
+end
+
+local Library = loadstring(game:HttpGet("https://github.com/ActualMasterOogway/Fluent-Renewed/releases/latest/download/Fluent.luau"))()
+local SaveManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/ActualMasterOogway/Fluent-Renewed/master/Addons/SaveManager.luau"))()
+local InterfaceManager = loadstring(game:HttpGet("https://raw.githubusercontent.com/ActualMasterOogway/Fluent-Renewed/master/Addons/InterfaceManager.luau"))()
+
+local Window = Library:CreateWindow{
+    Title = "OpenViz",
+    SubTitle = ":D",
+    TabWidth = 29,
+    Size = UDim2.fromOffset(494,463),
+    Resize = true,
+    MinSize = Vector2.new(470, 380),
+    Acrylic = true,
+    Theme = "Darker",
+    MinimizeKey = Enum.KeyCode.K
+}
+
+local Tabs = {
+    Visualizer = Window:CreateTab{ Title = "Visualizer", Icon = "eye" },
+    Settings = Window:CreateTab{ Title = "Settings", Icon = "settings" }
+}
+
+Tabs.Visualizer:CreateSection("Preset Configuration")
+
+local presetOptions = {}
+for k in pairs(orbitPresets) do table.insert(presetOptions, k) end
+table.sort(presetOptions)
+
+local PresetDropdown = Tabs.Visualizer:CreateDropdown("PresetsDropdown", {
+    Title = "Presets",
+    Values = presetOptions,
+    Multi = false,
+    Default = 1,
+})
+
+PresetDropdown:OnChanged(function(Value)
+    if not Value then return end
+    activePresetName = Value
+    activePreset = orbitPresets[Value]
+    if orbiting and character and character:FindFirstChild("Humanoid") then
+        if activePreset.r6Clone or activePreset.wheelClone then
+            character.Humanoid.WalkSpeed = 0
+            character.Humanoid.JumpPower = 0
+            if character:FindFirstChild("HumanoidRootPart") then
+                clonePos = character.HumanoidRootPart.Position + character.HumanoidRootPart.CFrame.LookVector * -3
+                cloneLook = character.HumanoidRootPart.CFrame.LookVector
+            end
+            workspace.CurrentCamera.CameraSubject = camPart
+        else
+            character.Humanoid.WalkSpeed = 16
+            character.Humanoid.JumpPower = 50
+            workspace.CurrentCamera.CameraSubject = character.Humanoid
+        end
+    end
+end)
+
+Tabs.Visualizer:CreateSlider("SpeedSldr", {
+    Title = "Speed", Default = 2, Min = 1, Max = 40, Rounding = 0,
+    Callback = function(v) currentSpeed = v*0.4 end
+})
+Tabs.Visualizer:CreateSlider("SizeSldr", {
+    Title = "Size", Default = 5, Min = 1, Max = 50, Rounding = 0,
+    Callback = function(v) currentSize = v end
+})
+Tabs.Visualizer:CreateSlider("HeightSldr", {
+    Title = "Height", Default = 0, Min = -25, Max = 30, Rounding = 0,
+    Callback = function(v) currentHeight = v end
+})
+
+local AudioReactTgl = Tabs.Visualizer:CreateToggle("AudioReactTgl", {Title = "Audio Visualize", Default = true})
+AudioReactTgl:OnChanged(function() audioVisualizerEnabled = AudioReactTgl.Value end)
+
+local NetlessTgl = Tabs.Visualizer:CreateToggle("NetlessTgl", {Title = "Netless", Default = true})
+NetlessTgl:OnChanged(function() netlessEnabled = NetlessTgl.Value end)
+
+Tabs.Visualizer:CreateSection("Controls")
+
+Tabs.Visualizer:CreateInput("TargetInput", {
+    Title = "Target Player", Placeholder = "Username...", Finished = false,
+    Callback = function(text)
+        if text == "" then targetPlayer = player; return end
+        for _, p in ipairs(Players:GetPlayers()) do
+            if string.sub(string.lower(p.Name), 1, #text) == string.lower(text) then targetPlayer = p; return end
+        end
+    end
+})
+
+Tabs.Visualizer:CreateInput("AudioInput", {
+    Title = "Audio ID", Placeholder = "Enter Audio ID", Finished = false,
+    Callback = function(text)
+        local id = string.match(text, "%d+")
+        if id then
+            audioId = tonumber(id)
+            if player.Character then fireBoombox(tostring(audioId), tostring(audioId)) end
+        end
+    end
+})
+
+Tabs.Visualizer:CreateButton{
+    Title = "Sync Audio", Callback = function()
+        if not audioId then return end
+        fireBoombox(tostring(audioId), tostring(audioId))
+    end
+}
+
+Tabs.Visualizer:CreateButton{
+    Title = "Visualize", Callback = function()
+        stopVisualizer()
+        orbiting = true
+        orbitStartTime = tick()
+        idxCounter = 0
+        setToolAnim("rbxassetid://69")
+
+        for _, jjj in ipairs(player.Character:GetChildren()) do
+            if jjj:IsA("Tool") then jjj.Parent = player.Backpack end
+        end
+
+        if type(activePreset) == "table" and (activePreset.r6Clone or activePreset.wheelClone)
+        and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+            player.Character.Humanoid.WalkSpeed = 0
+            player.Character.Humanoid.JumpPower = 0
+            clonePos = player.Character.HumanoidRootPart.Position
+                    + player.Character.HumanoidRootPart.CFrame.LookVector * -3
+            cloneLook = player.Character.HumanoidRootPart.CFrame.LookVector
+            activeEmote = nil
+            timeIdle = 0
+            wheelRollAngle = 0
+            workspace.CurrentCamera.CameraSubject = camPart
+        end
+
+        if player.Backpack then
+            for _, tool in ipairs(player.Backpack:GetChildren()) do
+                if tool:IsA("Tool") then tool.Parent = player.Character end
+            end
+        end
+        for _, jjj in ipairs(player.Character:GetChildren()) do
+            if jjj:IsA("Tool") then jjj.Parent = player.Backpack end
+        end
+        for _, tool in ipairs(player:WaitForChild("Backpack"):GetChildren()) do
+            if tool:IsA("Tool") and tool:FindFirstChild("Handle") then
+                tool.Parent = player.Character
+                tool.Parent = player.Backpack
+                tool.Parent = player.Character
+                if player.Character:FindFirstChild("Humanoid") then
+                    tool.Parent = player.Character:FindFirstChild("Humanoid")
+                end
+                tool.Parent = player.Character
+                RunService.Heartbeat:Wait()
+                trackTool(tool)
+            end
+        end
+    end
+}
+
+Tabs.Settings:CreateSection("Utility")
+
+local StealToolsTgl = Tabs.Settings:CreateToggle("StealToolsTgl", {Title = "Steal Tools", Default = false})
+StealToolsTgl:OnChanged(function() stealToolsEnabled = StealToolsTgl.Value end)
+
+Tabs.Settings:CreateButton{Title = "Infinite Yield", Callback = function()
+    loadstring(game:HttpGet("https://raw.githubusercontent.com/EdgeIY/infiniteyield/master/source"))()
+end}
+
+SaveManager:SetLibrary(Library)
+InterfaceManager:SetLibrary(Library)
+SaveManager:IgnoreThemeSettings()
+SaveManager:SetIgnoreIndexes{}
+InterfaceManager:SetFolder("OpenVizConfigs")
+SaveManager:SetFolder("OpenVizConfigs/Settings")
+InterfaceManager:BuildInterfaceSection(Tabs.Settings)
+SaveManager:BuildConfigSection(Tabs.Settings)
+Window:SelectTab(1)
+SaveManager:LoadAutoloadConfig()
+
+player.CharacterAdded:Connect(function(char)
+    character = char
+    targetPlayer = player
+    stopVisualizer()
+end)
+
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    if not orbiting or type(activePreset) ~= "table" or not activePreset.r6Clone then return end
+    if input.KeyCode == Enum.KeyCode.E then activeEmote="Dance2"; emoteStartTime=tick()
+    elseif input.KeyCode==Enum.KeyCode.T then activeEmote="Pharaoh"; emoteStartTime=tick()
+    elseif input.KeyCode==Enum.KeyCode.Y then activeEmote="Vibe"; emoteStartTime=tick()
+    elseif input.KeyCode==Enum.KeyCode.U then activeEmote="Robot"; emoteStartTime=tick()
+    elseif input.KeyCode==Enum.KeyCode.R then activeEmote="ChillSway"; emoteStartTime=tick()
+    elseif input.KeyCode==Enum.KeyCode.F then activeEmote="HeadPlay"; emoteStartTime=tick()
+    elseif input.KeyCode==Enum.KeyCode.G then activeEmote="StepTouch"; emoteStartTime=tick()
+    elseif input.KeyCode==Enum.KeyCode.H then activeEmote="Floss"; emoteStartTime=tick()
+    elseif input.KeyCode==Enum.KeyCode.J then activeEmote="Wave"; emoteStartTime=tick()
+    elseif input.KeyCode==Enum.KeyCode.L then activeEmote="Spin"; emoteStartTime=tick()
+    elseif input.KeyCode==Enum.KeyCode.Z then activeEmote="Jump"; emoteStartTime=tick()
+    elseif input.KeyCode==Enum.KeyCode.X then activeEmote="Breakdance"; emoteStartTime=tick()
+    end
+end)
+
+local sharedRayParams = RaycastParams.new()
+sharedRayParams.FilterType = Enum.RaycastFilterType.Exclude
+
+task.spawn(function()
+    while task.wait(1) do
+        if orbiting and type(activePreset) == "table" and (activePreset.wheelClone or activePreset.r6Clone) then
+            local filterList = {character}
+            for _, p in ipairs(Players:GetPlayers()) do
+                if p ~= player and p.Character then table.insert(filterList, p.Character) end
+            end
+            for tool, _ in pairs(tracked) do table.insert(filterList, tool) end
+            sharedRayParams.FilterDescendantsInstances = filterList
+        end
+    end
+end)
+
+task.spawn(function()
+    while task.wait(0.1) do
+        if stealToolsEnabled and player.Character and player.Character:FindFirstChild("Humanoid") then
+            for _, j in ipairs(workspace:GetChildren()) do
+                if j:IsA("Tool") then player.Character.Humanoid:EquipTool(j) end
+            end
+        end
+    end
+end)
+
+RunService.Heartbeat:Connect(function(dt)
+    if not orbiting or not player.Character then return end
+
+    local lostTool = false
+    for tool, _ in pairs(tracked) do
+        if not tool.Parent or tool.Parent == player.Backpack then
+            lostTool = true; break
+        end
+    end
+    if lostTool then stopVisualizer(); print("tool lost"); return end
+
+    local tChar = (targetPlayer and targetPlayer.Parent) and targetPlayer.Character or player.Character
+    local hrp = tChar and tChar:FindFirstChild("HumanoidRootPart")
+    if not hrp or (tChar:FindFirstChild("Humanoid") and tChar.Humanoid.Health <= 0) then return end
+
+    local t = tick() - orbitStartTime
+
+    if audioVisualizerEnabled then
+        local loudness = getMaxLoudness()
+        local activeMaxBoost = maxRadiusBoost * visualizerSensitivity
+        currentRadiusBoost = currentRadiusBoost
+             + ((loudness > loudnessThreshold
+                and math.min((loudness - loudnessThreshold) / 450, 1) * activeMaxBoost
+                or 0)
+               - currentRadiusBoost) * smoothingFactor
+    else
+        currentRadiusBoost = 0
+    end
+
+    local headSpin, headTilt, torsoTwist, rArmPitch, rArmRoll, lArmPitch, lArmRoll = 0, 0, 0, 0, 0, 0, 0
+    local rLegPitch, lLegPitch, extraBob, extraY = 0, 0, 0, 0
+    local headX, headY, headZ, torsoPitch, torsoRoll, rLegRoll, lLegRoll = 0, 0, 0, 0, 0, 0, 0
+    local isMoving, swing, bob = false, 0, 0
+
+    if type(activePreset) == "table" and (activePreset.r6Clone or activePreset.wheelClone) and targetPlayer == player then
+        local cam = workspace.CurrentCamera
+        local moveDir = Vector3.new()
+        local manualInput = false
+
+        if UserInputService:IsKeyDown(Enum.KeyCode.W) then moveDir += cam.CFrame.LookVector; manualInput=true end
+        if UserInputService:IsKeyDown(Enum.KeyCode.S) then moveDir -= cam.CFrame.LookVector; manualInput=true end
+        if UserInputService:IsKeyDown(Enum.KeyCode.A) then moveDir -= cam.CFrame.RightVector; manualInput=true end
+        if UserInputService:IsKeyDown(Enum.KeyCode.D) then moveDir += cam.CFrame.RightVector; manualInput=true end
+        if UserInputService:IsKeyDown(Enum.KeyCode.Space) then manualInput=true end
+
+        if manualInput then activeEmote=nil; timeIdle=0 else timeIdle=timeIdle+dt end
+
+        moveDir = Vector3.new(moveDir.X, 0, moveDir.Z)
+        if moveDir.Magnitude > 0.01 then
+            moveDir = moveDir.Unit
+            cloneLook = cloneLook:Lerp(moveDir, 15*dt)
+        end
+
+        local targetSpeed = moveDir * (8 * currentSpeed)
+        cloneVel = Vector3.new(
+             cloneVel.X + (targetSpeed.X - cloneVel.X) * 15 * dt,
+            cloneVel.Y - workspace.Gravity * dt,
+            cloneVel.Z + (targetSpeed.Z - cloneVel.Z) * 15 * dt)
+
+        cloneOnGround = false
+        local verticalOffset = 4
+        local ray = workspace:Raycast(clonePos + Vector3.new(0,3,0), Vector3.new(0,-10,0), sharedRayParams)
+        if ray then
+            local targetY = ray.Position.Y + verticalOffset
+            if cloneVel.Y <= 0.1 and clonePos.Y <= targetY+1 then
+                clonePos = Vector3.new(clonePos.X, targetY, clonePos.Z)
+                cloneVel = Vector3.new(cloneVel.X, 0, cloneVel.Z)
+                cloneOnGround = true
+            end
+        end
+
+        if cloneOnGround and UserInputService:IsKeyDown(Enum.KeyCode.Space) then
+            cloneVel = Vector3.new(cloneVel.X, 50, cloneVel.Z)
+            cloneOnGround = false
+            clonePos += Vector3.new(0, 0.5, 0)
+        end
+
+        clonePos += cloneVel * dt
+        camPart.CFrame = CFrame.new(clonePos + Vector3.new(0, 3, 0))
+
+        isMoving = Vector3.new(cloneVel.X, 0, cloneVel.Z).Magnitude > 2
+
+        if not cloneOnGround then swing = 0.5
+        elseif isMoving then
+            swing = math.sin(t*10) * 0.8
+            bob = math.abs(math.sin(t*10)) * 0.1
+        else
+            swing = math.sin(t*2) * 0.08
+            bob = math.sin(t*2) * 0.05
+        end
+
+        if activeEmote == "Dance2" then
+            local eTime = t - emoteStartTime
+            local sway = math.sin(eTime*4)
+            torsoRoll = sway*0.15; extraBob = math.abs(math.sin(eTime*8))*0.2
+            rArmPitch = math.rad(90); rArmRoll = math.rad(45)+sway*0.6
+            lArmPitch = math.rad(90); lArmRoll = math.rad(-45)+sway*0.6
+            rLegRoll = sway*0.1; lLegRoll = sway*0.1; headTilt = -sway*0.1
+        elseif activeEmote == "ChillSway" then
+            local eTime = t - emoteStartTime
+            local sway = math.sin(eTime*2)
+            torsoRoll = sway*0.1; headTilt = -sway*0.05
+            rArmPitch = math.rad(10)-sway*0.1; rArmRoll = math.rad(-5)
+            lArmPitch = math.rad(10)+sway*0.1; lArmRoll = math.rad(5)
+            rLegPitch = sway*0.05; lLegPitch = -sway*0.05
+        elseif activeEmote == "Vibe" then
+            local eTime = t - emoteStartTime
+            local beat = math.sin(eTime*5)
+            headTilt = math.rad(15)+beat*0.1; extraBob = math.abs(math.sin(eTime*5))*0.15
+            rArmPitch = math.rad(20); rArmRoll = math.rad(-15)
+            lArmPitch = math.rad(20); lArmRoll = math.rad(15)
+            torsoRoll = beat*0.05
+        elseif activeEmote == "StepTouch" then
+            local eTime = t - emoteStartTime
+            local step = math.sin(eTime*3)
+            torsoTwist = step*0.2; extraBob = math.abs(math.sin(eTime*6))*0.2
+            rArmPitch = math.rad(45)+math.sin(eTime*6)*0.2; rArmRoll = math.rad(-20)
+            lArmPitch = math.rad(45)+math.sin(eTime*6)*0.2; lArmRoll = math.rad(20)
+        elseif activeEmote == "Pharaoh" then
+            local eTime = t - emoteStartTime
+            local wave = math.sin(eTime*4)
+            torsoTwist = math.rad(40); headSpin = math.rad(-40)
+            extraBob = math.abs(math.sin(eTime*8))*0.2
+            rArmPitch = math.rad(45)+wave*math.rad(45); rArmRoll = math.rad(45)
+            lArmPitch = math.rad(45)-wave*math.rad(45); lArmRoll = math.rad(-45)
+        elseif activeEmote == "Robot" then
+            local eTime = t - emoteStartTime
+            local snap = math.floor(eTime*5)/5
+            headSpin = math.sin(snap*3)*0.6
+            rArmPitch = math.rad(90)+math.sin(snap*5)*0.5
+            lArmPitch = math.rad(90)+math.cos(snap*5)*0.5
+            torsoTwist = math.cos(snap*2)*0.3
+        elseif activeEmote == "HeadPlay" then
+            local eTime = t - emoteStartTime
+            local cycle = eTime % 5
+            if cycle < 1 then
+                rArmPitch = math.rad(150)*cycle; rArmRoll = math.rad(-20)*cycle
+            elseif cycle < 2.5 then
+                rArmPitch = math.rad(150)+math.sin(t*15)*0.1
+                headX = 1.2; headY = -1.2+math.sin(t*15)*0.3; headZ = -0.5
+            elseif cycle < 3.5 then
+                local tTime = cycle-2.5
+                rArmPitch = math.rad(150)-math.rad(150)*tTime
+                headX = 1.2*(1-tTime); headY = 4*math.sin(tTime*math.pi)
+                headZ = -0.5*(1-tTime); headSpin = tTime*math.pi*6
+            else
+                rArmPitch = math.rad(135); rArmRoll = math.rad(45)
+                lArmPitch = math.rad(135); lArmRoll = math.rad(-45)
+                headY = math.sin(t*5)*0.1
+            end
+        elseif activeEmote == "Floss" then
+            local eTime = t - emoteStartTime
+            local sway = math.sin(eTime*6)
+            torsoRoll = sway*0.2
+            rArmPitch = math.rad(90); rArmRoll = math.rad(45)-sway*0.5
+            lArmPitch = math.rad(90); lArmRoll = math.rad(-45)-sway*0.5
+            rLegRoll = sway*0.15; lLegRoll = sway*0.15
+            extraBob = math.abs(math.sin(eTime*12))*0.1
+        elseif activeEmote == "Wave" then
+            local eTime = t - emoteStartTime
+            local wave = math.sin(eTime*8)
+            rArmPitch = math.rad(150); rArmRoll = math.rad(45)+wave*0.4
+            headTilt = math.rad(10)
+            rLegPitch = 0.05; lLegPitch = -0.05
+        elseif activeEmote == "Spin" then
+            local eTime = t - emoteStartTime
+            headSpin = eTime * 4
+            torsoTwist = eTime * 3
+            rArmPitch = math.rad(45); lArmPitch = math.rad(45)
+            rArmRoll = math.rad(-30); lArmRoll = math.rad(30)
+        elseif activeEmote == "Jump" then
+            local eTime = t - emoteStartTime
+            local bounce = math.abs(math.sin(eTime*6))
+            extraY = bounce * 1.5
+            rArmPitch = math.rad(45) - bounce*0.3; lArmPitch = math.rad(45) - bounce*0.3
+        elseif activeEmote == "Breakdance" then
+            local eTime = t - emoteStartTime
+            headSpin = eTime*8
+            rArmPitch = math.rad(90)+math.sin(eTime*10)*0.8
+            lArmPitch = math.rad(90)+math.cos(eTime*10)*0.8
+            extraBob = math.abs(math.sin(eTime*10))*0.15
+        elseif activeEmote == nil and timeIdle > 10 then
+            local p = timeIdle - 10
+            if p < 5 then
+                headSpin = math.sin(p*2)*0.6
+                if p > 1 and p < 4 then rArmPitch = math.rad(135)+math.sin(p*12)*0.4; rArmRoll = math.rad(-20) end
+            else
+                timeIdle = 0
+            end
+        end
+    end
+
+    -- R6 Clone positioning — grid inside each body part, scales with boombox count
+    if type(activePreset) == "table" and activePreset.r6Clone then
+        local totalTools = math.max(1, countTracked())
+        local perPart    = math.max(1, math.ceil(totalTools / 7))
+        local gridSide   = math.max(1, math.ceil(perPart ^ (1/3)))
+        local S          = 1 + (gridSide - 1) * 0.5
+
+        local slot = ((data_index_from(tracked) - 1) % 7) + 1
+        -- placeholder, will be replaced below
+    end
+
+    for tool, data in pairs(tracked) do
+        local h = data.handle
+        if not (h and h.Parent) then
+            untrackAndDestroy(tool)
+        else
+            pcall(function()
+                h.Massless = true
+                h.CanCollide = false
+                if netlessEnabled and data.netlessAllowed then
+                    h.AssemblyLinearVelocity = netlessVector
+                end
+            end)
+
+            local tPos, tRot
+
+            if type(activePreset) == "table" and activePreset.r6Clone then
+                local totalTools = math.max(1, countTracked())
+                local perPart    = math.max(1, math.ceil(totalTools / 7))
+                local gridSide   = math.max(1, math.ceil(perPart ^ (1/3)))
+                local S          = 1 + (gridSide - 1) * 0.5
+
+                local slot = ((data.index - 1) % 7) + 1
+                local sub  = math.floor((data.index - 1) / 7)
+
+                local gx = sub % gridSide
+                local gy = math.floor(sub / gridSide) % gridSide
+                local gz = math.floor(sub / (gridSide * gridSide)) % gridSide
+                local u  = gridSide > 1 and (gx / (gridSide - 1) - 0.5) or 0
+                local v  = gridSide > 1 and (gy / (gridSide - 1) - 0.5) or 0
+                local w  = gridSide > 1 and (gz / (gridSide - 1) - 0.5) or 0
+
+                local spread = 0.8 + (gridSide - 1) * 0.4
+                local jX = u * spread
+                local jY = v * spread
+                local jZ = w * spread
+
+                local rootRot      = CFrame.lookAt(clonePos, clonePos + cloneLook)
+                local upperBodyRot = CFrame.Angles(torsoPitch, torsoTwist, torsoRoll)
+                local offset
+
+                if slot == 1 then
+                    offset = CFrame.new(jX, (0.25+bob+extraBob+extraY)*S + jY, jZ)
+                          * upperBodyRot
+                          * CFrame.Angles(0,0,math.rad(180))
+                elseif slot == 2 then
+                    offset = CFrame.new(jX, (-0.75+bob+extraBob+extraY)*S + jY, jZ)
+                          * upperBodyRot
+                elseif slot == 3 then
+                    offset = CFrame.new(headX*S + jX, (2.2+bob+extraBob+extraY+headY)*S + jY, headZ*S + jZ)
+                          * upperBodyRot
+                          * CFrame.Angles(headTilt,headSpin,0)
+                elseif slot == 4 then
+                    offset = upperBodyRot
+                          * CFrame.new(1.8*S + jX, (1+bob+extraBob+extraY)*S + jY, jZ)
+                          * CFrame.Angles(swing+rArmPitch,0,rArmRoll)
+                          * CFrame.new(0,-1.2*S,0)
+                          * CFrame.Angles(0,0,math.rad(90))
+                elseif slot == 5 then
+                    offset = upperBodyRot
+                          * CFrame.new(-1.8*S + jX, (1+bob+extraBob+extraY)*S + jY, jZ)
+                          * CFrame.Angles(-swing+lArmPitch,0,lArmRoll)
+                          * CFrame.new(0,-1.2*S,0)
+                          * CFrame.Angles(0,0,math.rad(-90))
+                elseif slot == 6 then
+                    offset = CFrame.new(0.6*S + jX, -1.5*S + jY, jZ)
+                          * CFrame.Angles((isMoving and -swing or -swing*0.5)+rLegPitch,0,rLegRoll)
+                          * CFrame.new(0,-1.2*S,0)
+                          * CFrame.Angles(0,0,math.rad(90))
+                elseif slot == 7 then
+                    offset = CFrame.new(-0.6*S + jX, -1.5*S + jY, jZ)
+                          * CFrame.Angles((isMoving and swing or swing*0.5)+lLegPitch,0,lLegRoll)
+                          * CFrame.new(0,-1.2*S,0)
+                          * CFrame.Angles(0,0,math.rad(-90))
+                end
+
+                local finalCFrame = rootRot * offset
+                tPos = finalCFrame.Position
+                tRot = finalCFrame
+            end
+
+            if data.alignPos and data.alignRot and tPos then
+                data.alignPos.Position = tPos
+                data.alignRot.CFrame = tRot
+            end
+        end
+    end
+end)
+
+pcall(function()
+    local currentPlaceId = game.PlaceId
+    local gameName = MarketplaceService:GetProductInfo(currentPlaceId).Name or "This Game"
+    if gameConfigs[currentPlaceId] then
+        Library:Notify{ Title = "OpenViz", Content = "Game: " .. gameName .. " is supported!", Duration = 5 }
+    else
+        Library:Notify{ Title = "OpenViz", Content = "Game: " .. gameName .. " isn't supported but may work!", Duration = 5 }
+    end
+end)
+
+local AUTOSAVE_NAME = "AutoSave"
+local AUTOSAVE_INTERVAL = 3
+task.spawn(function()
+    while true do
+        task.wait(AUTOSAVE_INTERVAL)
+        pcall(function() SaveManager:Save(AUTOSAVE_NAME) end)
+    end
+end)
+pcall(function() SaveManager:Load(AUTOSAVE_NAME) end)
